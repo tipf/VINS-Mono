@@ -46,6 +46,8 @@ class FeatureTracker
 
     void undistortedPoints();
 
+    double distance(cv::Point2f &pt1, cv::Point2f &pt2);
+
     cv::Mat mask;
     cv::Mat fisheye_mask;
     cv::Mat prev_img, cur_img, forw_img;

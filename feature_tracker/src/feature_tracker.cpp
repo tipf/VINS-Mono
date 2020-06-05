@@ -33,13 +33,20 @@ FeatureTracker::FeatureTracker()
 {
 }
 
+double FeatureTracker::distance(cv::Point2f &pt1, cv::Point2f &pt2)
+{
+    double dx = pt1.x - pt2.x;
+    double dy = pt1.y - pt2.y;
+    return sqrt(dx * dx + dy * dy);
+}
+
 void FeatureTracker::setMask()
 {
     if(FISHEYE)
         mask = fisheye_mask.clone();
     else
         mask = cv::Mat(ROW, COL, CV_8UC1, cv::Scalar(255));
-    
+
 
     // prefer to keep features that are tracked for long time
     vector<pair<int, pair<cv::Point2f, int>>> cnt_pts_id;
@@ -112,6 +119,23 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         vector<float> err;
         cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
 
+        /** UPDATE: backport of backward optical flow from VINS-Fusion */
+        if(true)
+        {
+            vector<uchar> reverse_status;
+            vector<cv::Point2f> reverse_pts = cur_pts;
+            cv::calcOpticalFlowPyrLK(forw_img, cur_img, forw_pts, reverse_pts, reverse_status, err, cv::Size(21, 21), 3);
+            for(size_t i = 0; i < status.size(); i++)
+            {
+                if(status[i] && reverse_status[i] && distance(cur_pts[i], reverse_pts[i]) <= 0.5)
+                {
+                    status[i] = 1;
+                }
+                else
+                    status[i] = 0;
+            }
+        }
+
         for (int i = 0; i < int(forw_pts.size()); i++)
             if (status[i] && !inBorder(forw_pts[i]))
                 status[i] = 0;
@@ -146,7 +170,57 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
                 cout << "mask type wrong " << endl;
             if (mask.size() != forw_img.size())
                 cout << "wrong size " << endl;
-            cv::goodFeaturesToTrack(forw_img, n_pts, MAX_CNT - forw_pts.size(), 0.01, MIN_DIST, mask);
+
+            /** UPDATE: scale big images down */
+            cv::UMat forw_img_small, mask_small;
+            double Scale;
+            if(forw_img.total() > 800*600)
+            {
+              Scale = 2.0;
+              const double ScaleInv = 1.0/Scale;
+              cv::resize(forw_img, forw_img_small, cv::Size(), ScaleInv, ScaleInv, CV_INTER_AREA);
+              cv::resize(mask, mask_small, cv::Size(), ScaleInv, ScaleInv, CV_INTER_AREA);
+            }
+            else
+            {
+              forw_img.copyTo(forw_img_small);
+              mask.copyTo(mask_small);
+              Scale = 1.0;
+            }
+
+            /** UPDATE: ORB */
+//            std::vector<cv::KeyPoint> keypoints;
+//            cv::KeyPoint::convert(n_pts, keypoints);
+//            cv::Ptr<cv::FeatureDetector> OrbDet = cv::ORB::create(n_max_cnt);
+//            OrbDet->detect(forw_img_small, keypoints, mask_small);
+//            cv::KeyPoint::convert(keypoints, n_pts);
+
+            /** UPDATE: AGAST */
+//            std::vector<cv::KeyPoint> keypoints;
+//            cv::KeyPoint::convert(n_pts, keypoints);
+//            cv::Ptr<cv::FeatureDetector> AgastDet = cv::AgastFeatureDetector::create(20, true, cv::AgastFeatureDetector::AGAST_7_12s);
+//            AgastDet->detect(forw_img_small, keypoints, mask_small);
+//            cv::KeyPoint::convert(keypoints, n_pts);
+
+            /** UPDATE: GFTT corner detector with two kind of features */
+            cv::goodFeaturesToTrack(forw_img_small, n_pts, n_max_cnt, 0.001, MIN_DIST/Scale, mask_small, 5, false); /**< Shi-Tomasi corners */
+
+            /** UPDATE: get more corners if number is low */
+            if(n_pts.size() < (MAX_CNT*0.9))
+            {
+              cv::goodFeaturesToTrack(forw_img_small, n_pts, MAX_CNT - n_pts.size(), 0.0001, MIN_DIST/Scale, mask_small, 10, false); /**< more bigger Shi-Tomasi corners */
+            }
+
+            /** UPDATE: recover correct scale */
+            if (Scale > 1.0)
+            {
+              for (auto &point: n_pts)
+              {
+                point *= Scale;
+              }
+            }
+
+
         }
         else
             n_pts.clear();
