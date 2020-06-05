@@ -12,6 +12,7 @@
 #include <std_msgs/Float32.h>
 
 #include <ceres/ceres.h>
+#include <ceres/normal_prior.h>
 #include "factor/imu_factor.h"
 #include "factor/pose_local_parameterization.h"
 #include "factor/projection_factor.h"
