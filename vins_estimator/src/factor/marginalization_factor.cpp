@@ -16,24 +16,6 @@ void ResidualBlockInfo::Evaluate()
     }
     cost_function->Evaluate(parameter_blocks.data(), residuals.data(), raw_jacobians);
 
-    //std::vector<int> tmp_idx(block_sizes.size());
-    //Eigen::MatrixXd tmp(dim, dim);
-    //for (int i = 0; i < static_cast<int>(parameter_blocks.size()); i++)
-    //{
-    //    int size_i = localSize(block_sizes[i]);
-    //    Eigen::MatrixXd jacobian_i = jacobians[i].leftCols(size_i);
-    //    for (int j = 0, sub_idx = 0; j < static_cast<int>(parameter_blocks.size()); sub_idx += block_sizes[j] == 7 ? 6 : block_sizes[j], j++)
-    //    {
-    //        int size_j = localSize(block_sizes[j]);
-    //        Eigen::MatrixXd jacobian_j = jacobians[j].leftCols(size_j);
-    //        tmp_idx[j] = sub_idx;
-    //        tmp.block(tmp_idx[i], tmp_idx[j], size_i, size_j) = jacobian_i.transpose() * jacobian_j;
-    //    }
-    //}
-    //Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(tmp);
-    //std::cout << saes.eigenvalues() << std::endl;
-    //ROS_ASSERT(saes.eigenvalues().minCoeff() >= -1e-6);
-
     if (loss_function)
     {
         double residual_scaling_, alpha_sq_norm_;
@@ -66,12 +48,14 @@ void ResidualBlockInfo::Evaluate()
 
         residuals *= residual_scaling_;
     }
+
+    /** TODO: remove unused dimensions for GMM model :-) */
 }
 
 MarginalizationInfo::~MarginalizationInfo()
 {
     //ROS_WARN("release marginlizationinfo");
-    
+
     for (auto it = parameter_block_data.begin(); it != parameter_block_data.end(); ++it)
         delete[] it->second;
 
@@ -79,7 +63,7 @@ MarginalizationInfo::~MarginalizationInfo()
     {
 
         delete[] factors[i]->raw_jacobians;
-        
+
         delete factors[i]->cost_function;
 
         delete factors[i];
@@ -253,24 +237,24 @@ void MarginalizationInfo::marginalize()
             ROS_BREAK();
         }
     }
-    for( int i = NUM_THREADS - 1; i >= 0; i--)  
+    for( int i = NUM_THREADS - 1; i >= 0; i--)
     {
-        pthread_join( tids[i], NULL ); 
+        pthread_join( tids[i], NULL );
         A += threadsstruct[i].A;
         b += threadsstruct[i].b;
     }
     //ROS_DEBUG("thread summing up costs %f ms", t_thread_summing.toc());
     //ROS_INFO("A diff %f , b diff %f ", (A - tmp_A).sum(), (b - tmp_b).sum());
 
-
     //TODO
     Eigen::MatrixXd Amm = 0.5 * (A.block(0, 0, m, m) + A.block(0, 0, m, m).transpose());
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(Amm);
 
-    //ROS_ASSERT_MSG(saes.eigenvalues().minCoeff() >= -1e-4, "min eigenvalue %f", saes.eigenvalues().minCoeff());
+//    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(Amm);
+//    Eigen::MatrixXd Amm_inv = saes.eigenvectors() * Eigen::VectorXd((saes.eigenvalues().array() > eps).select(saes.eigenvalues().array().inverse(), 0)).asDiagonal() * saes.eigenvectors().transpose();
 
-    Eigen::MatrixXd Amm_inv = saes.eigenvectors() * Eigen::VectorXd((saes.eigenvalues().array() > eps).select(saes.eigenvalues().array().inverse(), 0)).asDiagonal() * saes.eigenvectors().transpose();
-    //printf("error1: %f\n", (Amm * Amm_inv - Eigen::MatrixXd::Identity(m, m)).sum());
+    /** UPDATE: more robust inverese */
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> CODHess(Amm);
+    Eigen::MatrixXd Amm_inv = CODHess.pseudoInverse();
 
     Eigen::VectorXd bmm = b.segment(0, m);
     Eigen::MatrixXd Amr = A.block(0, m, m, n);
@@ -280,20 +264,13 @@ void MarginalizationInfo::marginalize()
     A = Arr - Arm * Amm_inv * Amr;
     b = brr - Arm * Amm_inv * bmm;
 
+    /** UPDATE: more efficient math */
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes2(A);
-    Eigen::VectorXd S = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array(), 0));
-    Eigen::VectorXd S_inv = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array().inverse(), 0));
+    const Eigen::VectorXd S = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array(), 0));
+    const Eigen::VectorXd S_inv = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array().inverse(), 0));
 
-    Eigen::VectorXd S_sqrt = S.cwiseSqrt();
-    Eigen::VectorXd S_inv_sqrt = S_inv.cwiseSqrt();
-
-    linearized_jacobians = S_sqrt.asDiagonal() * saes2.eigenvectors().transpose();
-    linearized_residuals = S_inv_sqrt.asDiagonal() * saes2.eigenvectors().transpose() * b;
-    //std::cout << A << std::endl
-    //          << std::endl;
-    //std::cout << linearized_jacobians << std::endl;
-    //printf("error2: %f %f\n", (linearized_jacobians.transpose() * linearized_jacobians - A).sum(),
-    //      (linearized_jacobians.transpose() * linearized_residuals - b).sum());
+    linearized_jacobians = saes2.eigenvectors() *  S.cwiseSqrt().asDiagonal() * saes2.eigenvectors().transpose();
+    linearized_residuals = saes2.eigenvectors() *  S_inv.cwiseSqrt().asDiagonal() * saes2.eigenvectors().transpose() * b;
 }
 
 std::vector<double *> MarginalizationInfo::getParameterBlocks(std::unordered_map<long, double *> &addr_shift)
@@ -332,14 +309,6 @@ MarginalizationFactor::MarginalizationFactor(MarginalizationInfo* _marginalizati
 
 bool MarginalizationFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
 {
-    //printf("internal addr,%d, %d\n", (int)parameter_block_sizes().size(), num_residuals());
-    //for (int i = 0; i < static_cast<int>(keep_block_size.size()); i++)
-    //{
-    //    //printf("unsigned %x\n", reinterpret_cast<unsigned long>(parameters[i]));
-    //    //printf("signed %x\n", reinterpret_cast<long>(parameters[i]));
-    //printf("jacobian %x\n", reinterpret_cast<long>(jacobians));
-    //printf("residual %x\n", reinterpret_cast<long>(residuals));
-    //}
     int n = marginalization_info->n;
     int m = marginalization_info->m;
     Eigen::VectorXd dx(n);
