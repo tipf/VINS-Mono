@@ -58,7 +58,7 @@ void readParameters(ros::NodeHandle &n)
 
     std::string OUTPUT_PATH;
     fsSettings["output_path"] >> OUTPUT_PATH;
-    VINS_RESULT_PATH = OUTPUT_PATH + "/vins_result_no_loop.csv";
+    VINS_RESULT_PATH = OUTPUT_PATH + "/stamped_traj_estimate.txt";
     std::cout << "result path " << VINS_RESULT_PATH << std::endl;
 
     // create folder if not exists
@@ -85,7 +85,7 @@ void readParameters(ros::NodeHandle &n)
         EX_CALIB_RESULT_PATH = OUTPUT_PATH + "/extrinsic_parameter.csv";
 
     }
-    else 
+    else
     {
         if ( ESTIMATE_EXTRINSIC == 1)
         {
@@ -108,8 +108,8 @@ void readParameters(ros::NodeHandle &n)
         TIC.push_back(eigen_T);
         ROS_INFO_STREAM("Extrinsic_R : " << std::endl << RIC[0]);
         ROS_INFO_STREAM("Extrinsic_T : " << std::endl << TIC[0].transpose());
-        
-    } 
+
+    }
 
     INIT_DEPTH = 5.0;
     BIAS_ACC_THRESHOLD = 0.1;
@@ -132,6 +132,6 @@ void readParameters(ros::NodeHandle &n)
     {
         TR = 0;
     }
-    
+
     fsSettings.release();
 }
