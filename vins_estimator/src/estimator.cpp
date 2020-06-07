@@ -777,8 +777,6 @@ void Estimator::optimization()
     {
         //printf("set relocalization factor! \n");
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
-        /** replace with autodiff version */
-//        ceres::LocalParameterization *local_parameterization = PoseLocalParameterizationAutoDiff::Create();
         problem.AddParameterBlock(relo_Pose, SIZE_POSE, local_parameterization);
         int retrive_feature_index = 0;
         int feature_index = -1;
